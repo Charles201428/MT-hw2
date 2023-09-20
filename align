@@ -48,32 +48,33 @@ def test (a) -> None:
 
 
 
-
-
 class Tokenizer:
-    def __init__(self, corpus, case_sensitive=True) -> None:
-        words_set = set()
-        for inpu in corpus:
-            for choice in inpu:
-                if case_sensitive:
-                    words_set.add(choice)
-                else:
-                    choice = choice.lower()
-                    words_set.add(choice)
-        self.toWord = list(words_set)
-        self.toIndex = {choice:index for index, choice in enumerate(self.toWord)}
-        self.V = len(self.toWord)
-    
-    def encode(self, inpu):
+    def __init__(self, corpus, case_sensitive=True) -> None:
+        words_set = set()
+        for inpu in corpus:
+            for choice in inpu:
+                if case_sensitive:
+                    words_set.add(choice)
+                else:
+                    choice = choice.lower()
+                    words_set.add(choice)
+        self.toWord = list(words_set)
+        self.toIndex = {choice:index for index, choice in enumerate(self.toWord)}
+        self.V = len(self.toWord)
+    
+    def encode(self, inpu):
 
-        encoderesult = [self.toIndex[word] for word in inpu]
+        encoderesult = [self.toIndex[word] for word in inpu]
 
-        return encoderesult
-    
-    def decode(self, inpuIndex):
+        return encoderesult
+    
+    def decode(self, inpuIndex):
 
-        decoderesult = [self.toWord[id] for id in inpuIndex]   
-        return decoderesult
+        decoderesult = [self.toWord[id] for id in inpuIndex]   
+        return decoderesult
+    
+
+
 
 
 class IBMModel1:
@@ -85,7 +86,7 @@ class IBMModel1:
         Use a Vf*Ve matrix to represent t(e|f), where the rows are different f
         and the columns are different e. Thus, each row sum to 1.
         '''
-        bitext_tokenized = [[f_tokenizer.encode(sent[0]), e_tokenizer.encode(sent[1])] for sent in bitext]
+        bitext_tokenized = [[f_tokenizer.encode(inpu[0]), e_tokenizer.encode(inpu[1])] for inpu in bitext]
         self.bitext = bitext_tokenized
         '''Integerized parallel corpus'''
         self.f_tokenizer = f_tokenizer
@@ -104,7 +105,7 @@ class IBMModel1:
         base, ext = os.path.splitext(opts.save_path)
         base = f"{base}_iter{iters}"
         path = base + ext
-        pk.dump(self, open(path, "wb"))
+        pickle.dump(self, open(path, "wb"))
 
     def em_train(self, iter_now=0):
         iters = iter_now
@@ -157,8 +158,8 @@ class IBMModel1:
         If either e or f is not in the vocabulary, return -1
         '''
         try:
-            ei = self.e_tokenizer.w2i[e]
-            fi = self.f_tokenizer.w2i[f]
+            ei = self.e_tokenizer.toIndex[e]
+            fi = self.f_tokenizer.toIndex[f]
         except KeyError:
             return -1
         return self.t[fi, ei]
@@ -183,18 +184,14 @@ if __name__ == "__main__":
     bitext = [[sentence.strip().split() for sentence in pair] for pair in zip(open(f_data), open(e_data))][:opts.num_sents]
     if opts.lower:
         bitext = [[[w.lower() for w in fs],[w.lower() for w in es]] for fs, es in bitext]
-    f_text = [sent[0] for sent in bitext]
-    e_text = [sent[1] for sent in bitext]
+    f_text = [inpu[0] for inpu in bitext]
+    e_text = [inpu[1] for inpu in bitext]
     f_tokenizer = Tokenizer(f_text)
     e_tokenizer = Tokenizer(e_text)
-    # bitext_tokenized = []
-    # for sent in bitext:
-    #     print(sent)
-    #     bitext_tokenized.append([f_tokenizer.encode(sent[0]), e_tokenizer.encode(sent[1])])
 
     logging.info(f"Vocabulary size - foreign:{f_tokenizer.V}, english:{e_tokenizer.V}")
     if opts.load_path:
-        ibm = pk.load(open(opts.load_path, "rb"))
+        ibm = pickle.load(open(opts.load_path, "rb"))
         if opts.iter_now is not None:
             ibm.em_train(opts.iter_now)
     else:
