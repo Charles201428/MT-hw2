@@ -164,7 +164,7 @@ def align(translation_model, bilingual_text):
 
 if __name__ == "__main__":
     o, fd, ed = parse()
-    loglvl = logging.DEBUG if opts.debugging else logging.INFO
+    loglvl = logging.DEBUG if o.debugging else logging.INFO
     logging.basicConfig(level=loglvl)
     b = [[s.strip().split() for s in p] for p in zip(open(fd), open(ed))][:o.num_sents]
     if o.lower:
