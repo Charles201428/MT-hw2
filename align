@@ -94,7 +94,7 @@ class IBMModel1:
         self.change = -1
     
     def save(self, iteration_count):
-        base_name, file_extension = os.path.splitext(opts.save_directory)
+        base_name, file_extension = os.path.splitext(o.save_path)
         base_name = f"{base_name}_iter{iteration_count}"
         path = base_name + file_extension
         pk.dump(self, open(path, "wb"))
