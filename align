@@ -148,7 +148,7 @@ class IBMModel1:
         return self.translation_prob[source_index, target_index]
 
 
-def align_wor(translation_model, bilingual_text):
+def align(translation_model, bilingual_text):
     for (source_sentence, target_sentence) in bilingual_text:
         for (source_index, source_word) in enumerate(source_sentence): 
             highest_probability = 0
@@ -163,26 +163,23 @@ def align_wor(translation_model, bilingual_text):
 
 
 if __name__ == "__main__":
-    o, f, e = parse()
-    b = []
-    for pair in zip(open(f), open(e)):
-        sentences = []
-        for sentence in pair:
-            sentences.append(sentence.strip().split())
-        b.append(sentences)
+    o, fd, ed = parse()
+    loglvl = logging.DEBUG if opts.debugging else logging.INFO
+    logging.basicConfig(level=loglvl)
+    b = [[s.strip().split() for s in p] for p in zip(open(fd), open(ed))][:o.num_sents]
     if o.lower:
         b = [[[word.lower() for word in fst],[word.lower() for word in est]] for fst, est in b]
-    source_text = [Input[0] for Input in b]
-    target_text = [Input[1] for Input in b]
-    source_t = Tokenizer(source_text)
-    target_t = Tokenizer(target_text)
+    ft = [Input[0] for Input in b]
+    et = [Input[1] for Input in b]
+    f_tokenizer = Tokenizer(ft)
+    e_tokenizer = Tokenizer(et)
 
-    logging.info(f"french:{source_t.V}, english:{target_t.V}")
+    logging.info(f"Vocabulary size - foreign:{f_tokenizer.V}, english:{e_tokenizer.V}")
     if o.load_path:
         model = pk.load(open(o.load_path, "rb"))
         if o.iter_now is not None:
             model.train(o.iter_now)
     else:
-        model = IBMModel1(b, source_t, target_t, o.save_path, tolerance=o.eps, max_iterations=o.max_iters)
+        model = IBMModel1(b, f_tokenizer, e_tokenizer, o.save_path, tolerance=o.eps, max_iterations=o.max_iters)
         model.train()
     align(model, b)
