@@ -78,104 +78,89 @@ class Tokenizer:
 
 
 class IBMModel1:
-    def __init__(self, bitext, f_tokenizer, e_tokenizer, save_path, eps=1e-5, max_iters=500) -> None:
-        '''
-        For all given f, \sum_e t(e|f) = 1
+    def __init__(self, bilingual_text, source_tokenizer, target_tokenizer, save_directory, tolerance=1e-5, max_iterations=50):
+        tokenized_text = [[source_tokenizer.encode(pair[0]), target_tokenizer.encode(pair[1])] for pair in bilingual_text]
+        self.bilingual_text = tokenized_text
+        self.source_tokenizer = source_tokenizer
+        self.target_tokenizer = target_tokenizer
+        self.source_vocab_size = source_tokenizer.V
+        self.target_vocab_size = target_tokenizer.V
+        self.translation_prob = np.ones((self.source_vocab_size, self.target_vocab_size)) / self.target_vocab_size
+        self.save_directory = save_directory
 
-        Suppose Vocabulary size of e and f are Ve and Vf.
-        Use a Vf*Ve matrix to represent t(e|f), where the rows are different f
-        and the columns are different e. Thus, each row sum to 1.
-        '''
-        bitext_tokenized = [[f_tokenizer.encode(inpu[0]), e_tokenizer.encode(inpu[1])] for inpu in bitext]
-        self.bitext = bitext_tokenized
-        '''Integerized parallel corpus'''
-        self.f_tokenizer = f_tokenizer
-        self.e_tokenizer = e_tokenizer
-        self.Vf = f_tokenizer.V
-        self.Ve = e_tokenizer.V
-        self.t = np.ones((self.Vf, self.Ve)) / self.Ve # so that each entry is uniformly 1 / Ve (row normalized)
-        self.save_path = save_path
-
-        self.eps = eps
-        self.max_iters = max_iters
-        self.is_converged = False
-        self.diff = -1
+        self.tolerance = tolerance
+        self.max_iterations = max_iterations
+        self.has_converged = False
+        self.change = -1
     
-    def save(self, iters):
-        base, ext = os.path.splitext(opts.save_path)
-        base = f"{base}_iter{iters}"
-        path = base + ext
-        pickle.dump(self, open(path, "wb"))
+    def save(self, iteration_count):
+        base_name, file_extension = os.path.splitext(opts.save_directory)
+        base_name = f"{base_name}_iter{iteration_count}"
+        path = base_name + file_extension
+        pk.dump(self, open(path, "wb"))
 
-    def em_train(self, iter_now=0):
-        iters = iter_now
-        while (iters < self.max_iters) and (not self.is_converged):
-            iters += 1
-            logging.info(f"Iteration {iters}, diff={self.diff:.8f}")
-            logging.debug(f"t(the|la)={self.t_e_f('the', 'la')}")
-            logging.debug(f"t(of|la)={self.t_e_f('of', 'la')}")
+    def train(self, current_iteration=0):
+        iteration = current_iteration
+        while (iteration < self.max_iterations) and (not self.has_converged):
+            iteration += 1
+            logging.info(f"Iteration {iteration}, change={self.change:.8f}")
+            logging.debug(f"translation_prob(the|la)={self.get_prob('the', 'la')}")
+            logging.debug(f"translation_prob(of|la)={self.get_prob('of', 'la')}")
 
-            # initialize
-            count = np.zeros((self.Vf, self.Ve))
-            total = np.zeros(self.Vf)
+            count_matrix = np.zeros((self.source_vocab_size, self.target_vocab_size))
+            total_vector = np.zeros(self.source_vocab_size)
 
-            for f_sent, e_sent in self.bitext:
-                # compute normalization
-                s_total = {}
-                for e in e_sent:
-                    s_total[e] = 0
-                    for f in f_sent:
-                        s_total[e] += self.t[f, e]
-                # collect counts
-                for e in e_sent:
-                    for f in f_sent:
-                        count[f, e] += self.t[f, e]/s_total[e]
-                        total[f] += self.t[f, e]/s_total[e]
+            for source_sentence, target_sentence in self.bilingual_text:
+                sentence_total = {}
+                for target_word in target_sentence:
+                    sentence_total[target_word] = 0
+                    for source_word in source_sentence:
+                        sentence_total[target_word] += self.translation_prob[source_word, target_word]
+
+                for target_word in target_sentence:
+                    for source_word in source_sentence:
+                        count_matrix[source_word, target_word] += self.translation_prob[source_word, target_word]/sentence_total[target_word]
+                        total_vector[source_word] += self.translation_prob[source_word, target_word]/sentence_total[target_word]
             
-            # estimate probabilities
-            self.diff = 0
-            for f in range(self.Vf):
-                for e in range(self.Ve):
-                    new_t = count[f, e] / total[f]
-                    el_diff = np.abs(new_t - self.t[f, e])
-                    self.diff = max(self.diff, el_diff)
-                    self.t[f, e] = new_t
+            self.change = 0
+            for source_word_idx in range(self.source_vocab_size):
+                for target_word_idx in range(self.target_vocab_size):
+                    updated_prob = count_matrix[source_word_idx, target_word_idx] / total_vector[source_word_idx]
+                    element_change = np.abs(updated_prob - self.translation_prob[source_word_idx, target_word_idx])
+                    self.change = max(self.change, element_change)
+                    self.translation_prob[source_word_idx, target_word_idx] = updated_prob
 
-            # check convergence and save
-            if self.diff < self.eps:
-                self.is_converged = True
-            self.save(iters)
+            if self.change < self.tolerance:
+                self.has_converged = True
+            self.save(iteration)
 
-        if self.is_converged:
-            logging.info(f"Model converged after {iters} iteration under error {self.eps}!")
+        if self.has_converged:
+            logging.info(f"Model converged after {iteration} iteration under error {self.tolerance}!")
         else:
-            logging.info(f"Training stopped after reaching max number of iterations {self.max_iters}")
+            logging.info(f"Training stopped after reaching max number of iterations {self.max_iterations}")
 
-    def t_e_f(self, e, f):
-        '''
-        Computes t(e|f), where e & f are both string words
-        
-        If either e or f is not in the vocabulary, return -1
-        '''
+    def get_prob(self, target_word, source_word):
         try:
-            ei = self.e_tokenizer.toIndex[e]
-            fi = self.f_tokenizer.toIndex[f]
+            target_index = self.target_tokenizer.toIndex[target_word]
+            source_index = self.source_tokenizer.toIndex[source_word]
         except KeyError:
             return -1
-        return self.t[fi, ei]
+        return self.translation_prob[source_index, target_index]
 
-def align(model, bitext):
-    for (f, e) in bitext:
-        for (i, f_i) in enumerate(f): 
-            max_prob = 0
-            best_j = 0
-            for (j, e_j) in enumerate(e):
-                if model.t_e_f(e_j, f_i) > max_prob:
-                    best_j = j
-                    max_prob = model.t_e_f(e_j, f_i)
-            if(max_prob > 0):
-                sys.stdout.write("%i-%i " % (i,best_j))
+
+def align_words(translation_model, bilingual_text):
+    for (source_sentence, target_sentence) in bilingual_text:
+        for (source_index, source_word) in enumerate(source_sentence): 
+            highest_probability = 0
+            best_target_index = 0
+            for (target_index, target_word) in enumerate(target_sentence):
+                if translation_model.t_e_f(target_word, source_word) > highest_probability:
+                    best_target_index = target_index
+                    highest_probability = translation_model.t_e_f(target_word, source_word)
+            if(highest_probability > 0):
+                sys.stdout.write("%i-%i " % (source_index, best_target_index))
         sys.stdout.write("\n")
+
 
 if __name__ == "__main__":
     opts, f_data, e_data = parse()
@@ -191,10 +176,10 @@ if __name__ == "__main__":
 
     logging.info(f"Vocabulary size - foreign:{f_tokenizer.V}, english:{e_tokenizer.V}")
     if opts.load_path:
-        ibm = pickle.load(open(opts.load_path, "rb"))
+        ibm = pk.load(open(opts.load_path, "rb"))
         if opts.iter_now is not None:
-            ibm.em_train(opts.iter_now)
+            ibm.train(opts.iter_now)
     else:
-        ibm = IBMModel1(bitext, f_tokenizer, e_tokenizer, opts.save_path, eps=opts.eps, max_iters=opts.max_iters)
-        ibm.em_train()
+        ibm = IBMModel1(bitext, f_tokenizer, e_tokenizer, opts.save_path, tolerance=opts.eps, max_iterations=opts.max_iters)
+        ibm.train()
     align(ibm, bitext)
