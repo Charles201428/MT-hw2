@@ -148,7 +148,7 @@ class IBMModel1:
         return self.translation_prob[source_index, target_index]
 
 
-def align_words(translation_model, bilingual_text):
+def align_wor(translation_model, bilingual_text):
     for (source_sentence, target_sentence) in bilingual_text:
         for (source_index, source_word) in enumerate(source_sentence): 
             highest_probability = 0
@@ -163,23 +163,26 @@ def align_words(translation_model, bilingual_text):
 
 
 if __name__ == "__main__":
-    opts, f_data, e_data = parse()
-    loglvl = logging.DEBUG if opts.debugging else logging.INFO
-    logging.basicConfig(level=loglvl)
-    bitext = [[sentence.strip().split() for sentence in pair] for pair in zip(open(f_data), open(e_data))][:opts.num_sents]
-    if opts.lower:
-        bitext = [[[w.lower() for w in fs],[w.lower() for w in es]] for fs, es in bitext]
-    f_text = [inpu[0] for inpu in bitext]
-    e_text = [inpu[1] for inpu in bitext]
-    f_tokenizer = Tokenizer(f_text)
-    e_tokenizer = Tokenizer(e_text)
+    o, f, e = parse()
+    b = []
+    for pair in zip(open(f), open(e)):
+        sentences = []
+        for sentence in pair:
+            sentences.append(sentence.strip().split())
+        b.append(sentences)
+    if o.lower:
+        b = [[[word.lower() for word in fst],[word.lower() for word in est]] for fst, est in b]
+    source_text = [Input[0] for Input in b]
+    target_text = [Input[1] for Input in b]
+    source_t = Tokenizer(source_text)
+    target_t = Tokenizer(target_text)
 
-    logging.info(f"Vocabulary size - foreign:{f_tokenizer.V}, english:{e_tokenizer.V}")
-    if opts.load_path:
-        ibm = pk.load(open(opts.load_path, "rb"))
-        if opts.iter_now is not None:
-            ibm.train(opts.iter_now)
+    logging.info(f"french:{source_t.V}, english:{target_t.V}")
+    if o.load_path:
+        model = pk.load(open(o.load_path, "rb"))
+        if o.iter_now is not None:
+            model.train(o.iter_now)
     else:
-        ibm = IBMModel1(bitext, f_tokenizer, e_tokenizer, opts.save_path, tolerance=opts.eps, max_iterations=opts.max_iters)
-        ibm.train()
-    align(ibm, bitext)
+        model = IBMModel1(b, source_t, target_t, o.save_path, tolerance=o.eps, max_iterations=o.max_iters)
+        model.train()
+    align(model, b)
