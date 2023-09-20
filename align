@@ -1,0 +1,126 @@
+#!/usr/bin/env python
+import os
+import sys
+import logging
+import optparse
+import numpy as np
+import pickle
+
+def get_args():
+    parser = optparse.OptionParser()
+    parser.add_option("-d", "--data", dest="data_prefix", default="data/hansards", help="Data prefix")
+    parser.add_option("-e", "--english", dest="english_suffix", default="e")
+    parser.add_option("-f", "--french", dest="french_suffix", default="f")
+    parser.add_option("--eps", dest="epsilon", default=1e-3, type="float")
+    parser.add_option("-n", "--num_sentences", dest="sentence_count", default=1e12, type="int")
+    parser.add_option("-l", "--lower", action="store_true", dest="to_lower")
+    parser.add_option("-g", "--debug", action="store_true", dest="debug_mode")
+    parser.add_option("-s", "--save", dest="save_loc", default="ibm1.pkl")
+    parser.add_option("-p", "--load", dest="load_loc", default="")
+    parser.add_option("-m", "--max_iterations", dest="max_iters", default=500, type="int")
+    parser.add_option("-c", "--continue_from", dest="continue_iter", type=int, default=None)
+    options, _ = parser.parse_args()
+
+    f_filepath = f"{options.data_prefix}.{options.french_suffix}"
+    e_filepath = f"{options.data_prefix}.{options.english_suffix}"
+
+    return options, f_filepath, e_filepath
+
+class Vocabulary:
+    def __init__(self, text_data, sensitive=True):
+        words = {word.lower() if not sensitive else word for sentence in text_data for word in sentence}
+        self.index_to_word = list(words)
+        self.word_to_index = {word: idx for idx, word in enumerate(self.index_to_word)}
+        self.size = len(self.index_to_word)
+
+    def encode(self, sentence):
+        return [self.word_to_index[word] for word in sentence]
+
+    def decode(self, indices):
+        return [self.index_to_word[i] for i in indices]
+    
+    
+
+class IBM1:
+    def __init__(self, paired_text, french_vocab, english_vocab, save_path, eps=1e-5, max_iter=500):
+        self.paired_text = [[french_vocab.encode(f), english_vocab.encode(e)] for f, e in paired_text]
+        self.french_vocab = french_vocab
+        self.english_vocab = english_vocab
+        self.prob_matrix = np.ones((french_vocab.size, english_vocab.size)) / english_vocab.size
+        self.save_path = save_path
+        self.eps = eps
+        self.max_iter = max_iter
+        
+    def save_model(self, iteration):
+        # Save the current state of the model to a file
+        with open(f"{self.save_path}_iter{iteration}.pkl", "wb") as file:
+            pickle.dump(self, file)
+            
+            
+    def train(self):
+        for iteration in range(self.max_iter):
+            count = np.zeros((self.french_vocab.size, self.english_vocab.size))
+            total = np.zeros(self.french_vocab.size)
+            
+            for french_sent, english_sent in self.paired_text:
+                s_total = {e: 0 for e in english_sent}
+                for e in english_sent:
+                    for f in french_sent:
+                        s_total[e] += self.prob_matrix[f, e]
+                
+                for e in english_sent:
+                    for f in french_sent:
+                        count[f, e] += self.prob_matrix[f, e] / s_total[e]
+                        total[f] += self.prob_matrix[f, e] / s_total[e]
+            
+            diff = 0
+            for f in range(self.french_vocab.size):
+                for e in range(self.english_vocab.size):
+                    new_prob = count[f, e] / total[f]
+                    diff = max(diff, abs(new_prob - self.prob_matrix[f, e]))
+                    self.prob_matrix[f, e] = new_prob
+
+            if diff < self.eps:
+                break
+                    
+    def probability(self, e_word, f_word):
+        e_idx = self.english_vocab.word_to_index.get(e_word, -1)
+        f_idx = self.french_vocab.word_to_index.get(f_word, -1)
+        return -1 if e_idx == -1 or f_idx == -1 else self.prob_matrix[f_idx, e_idx]
+    
+def alignment(model, paired_text):
+    for french, english in paired_text:
+        for i, f_word in enumerate(french): 
+            best_j, max_prob = 0, 0
+            for j, e_word in enumerate(english):
+                current_prob = model.probability(e_word, f_word)
+                if current_prob > max_prob:
+                    best_j, max_prob = j, current_prob
+            if max_prob > 0:
+                sys.stdout.write(f"{i}-{best_j} ")
+        sys.stdout.write("\n")
+        
+if __name__ == "__main__":
+    options, french_data_path, english_data_path = get_args()
+    log_level = logging.DEBUG if options.debug_mode else logging.INFO
+    logging.basicConfig(level=log_level)
+
+    data = [[sent.strip().split() for sent in pair] for pair in zip(open(french_data_path), open(english_data_path))][:options.sentence_count]
+    if options.to_lower:
+        data = [[w.lower() for w in sentence] for sentence in pair for pair in data]
+
+    french_vocab = Vocabulary([sentence[0] for sentence in data])
+    english_vocab = Vocabulary([sentence[1] for sentence in data])
+
+    logging.info(f"French Vocab Size: {french_vocab.size}, English Vocab Size: {english_vocab.size}")
+
+    model = None
+    if options.load_loc:
+        model = pickle.load(open(options.load_loc, "rb"))
+        if options.continue_iter:
+            model.train_continue(options.continue_iter)
+    else:
+        model = IBM1(data, french_vocab, english_vocab, options.save_loc, eps=options.epsilon, max_iter=options.max_iters)
+        model.train()
+
+    alignment(model, data)
