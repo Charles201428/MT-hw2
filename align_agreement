@@ -167,7 +167,7 @@ def align(model, model_r, bilingual_text):
             highest_probability = 0
             best_target_index = 0
             for (target_index, target_word) in enumerate(target_sentence):
-                probability = model.t_e_f(target_word, source_word)
+                probability = model.get_prob(target_word, source_word)
                 if probability > highest_probability:
                     best_target_index = target_index
                     highest_probability = probability
@@ -178,7 +178,7 @@ def align(model, model_r, bilingual_text):
             highest_probability = 0
             best_index = 0
             for (source_index, source_word) in enumerate(source_sentence):
-                probability = model_r.t_e_f(source_word, target_word)
+                probability = model_r.get_prob(source_word, target_word)
                 if probability >highest_probability:
                     best_index = source_index
                     highest_probability = probability
@@ -210,8 +210,8 @@ if __name__ == "__main__":
     
     ftr = [sent[0] for sent in br]
     etr = [sent[1] for sent in br]
-    f_tokenizer_r = Tokenizer(etr)
-    e_tokenizer_r = Tokenizer(ftr)
+    f_tokenizer_r = Tokenizer(et)
+    e_tokenizer_r = Tokenizer(ft)
 
   
 
@@ -221,7 +221,7 @@ if __name__ == "__main__":
         if o.iter_now is not None:
             ibm.train(o.iter_now)
     else:
-        ibm = IBMModel1(b, f_tokenizer, e_tokenizer, o.save_path, tolerance=o.eps, max_iterations=o.max_iters)
+        ibm = IBMModel1(b, f_tokenizer, e_tokenizer, o.save_path, tolerance=o.eps, max_iterations=8)
         ibm.train()
         
     if o.load_path_r:
@@ -229,7 +229,7 @@ if __name__ == "__main__":
         if o.iter_now is not None:
             ibm_r.train(o.iter_now)
     else:
-        ibm_r = IBMModel1(br, f_tokenizer_r, e_tokenizer_r, o.save_path_r, tolerance=o.eps, max_iterations=o.max_iters)
+        ibm_r = IBMModel1(br, f_tokenizer_r, e_tokenizer_r, o.save_path_r, tolerance=o.eps, max_iterations=8)
         ibm_r.train()
 
     align(ibm, ibm_r, b)
