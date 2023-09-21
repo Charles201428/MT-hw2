@@ -1,7 +1,5 @@
-#!/usr/bin/env python
 import numpy as np
 import pickle as pk
-
 import sys
 import os
 import optparse
@@ -17,18 +15,18 @@ def parse():
     optparser.add_option("-l", "--lower", action="store_true", dest="lower", help="Convert corpus to lower case (defualt=False)")
     optparser.add_option("-g", "--debugging", action="store_true", dest="debugging", help="Turn on debugging mode (defualt=False)")
     optparser.add_option("-s", "--save", dest="save_path", default="ibm1.pkl", help="Model save path")
+    optparser.add_option("-r", "--save_r", dest="save_path_r", default="ibm1_r.pkl", help="Reversed model save path")
     optparser.add_option("-p", "--pretrained", dest="load_path", default="", help="Model save path")
+    optparser.add_option("-t", "--pretrained_r", dest="load_path_r", default="", help="Reversed model save path")
     optparser.add_option("-m", "--max_iterations", dest="max_iters", default=500, type="int", help="Max number of iterations to train")
     optparser.add_option("-c", "--continue", dest="iter_now", type=int, default=None, help="Continue with iteration number provided by this option. Need to have -p option turned on")
     (opts, _) = optparser.parse_args()
 
-    french = f"{opts.train}.{opts.french}"
-    english = f"{opts.train}.{opts.english}"
+    f = f"{opts.train}.{opts.french}"
+    e = f"{opts.train}.{opts.english}"
 
     test(opts)
-
-    return opts, french, english
-
+    return opts, f, e
 
 
 def test (a) -> None:
@@ -44,8 +42,18 @@ def test (a) -> None:
         assert not os.path.exists(f), f"{f} occupied."
         os.makedirs(f)
         a.save_path = os.path.join(f, g)
-
-
+        
+    if not a.load_path_r:
+        c, d = os.path.splitext(a.save_path_r)
+        c = f"{c}_num{a.num_sents}_eps{a.eps}"
+        e = c + d
+        f, g = os.path.split(e)
+        f = os.path.join(f, c)
+        assert not os.path.exists(f), f"{f} occupied."
+        os.makedirs(f)
+        a.save_path = os.path.join(f, g)
+        
+    
 
 
 class Tokenizer:
@@ -147,48 +155,81 @@ class IBMModel1:
             return -1
         return self.translation_prob[source_index, target_index]
 
+    
+    
 
-def align(translation_model, bilingual_text):
+def align(model, model_r, bilingual_text):
+    
     for (source_sentence, target_sentence) in bilingual_text:
+        alignment = []
+        alignment_r = []
         for (source_index, source_word) in enumerate(source_sentence): 
             highest_probability = 0
             best_target_index = 0
             for (target_index, target_word) in enumerate(target_sentence):
-                if translation_model.t_e_f(target_word, source_word) > highest_probability:
+                probability = model.t_e_f(target_word, source_word)
+                if probability > highest_probability:
                     best_target_index = target_index
-                    highest_probability = translation_model.t_e_f(target_word, source_word)
+                    highest_probability = probability
             if(highest_probability > 0):
-                sys.stdout.write("%i-%i " % (source_index, best_target_index))
+                alignment.append([source_index,best_target_index])
+
+        for (target_index, target_word) in enumerate(target_sentence):
+            highest_probability = 0
+            best_index = 0
+            for (source_index, source_word) in enumerate(source_sentence):
+                probability = model_r.t_e_f(source_word, target_word)
+                if probability >highest_probability:
+                    best_index = source_index
+                    highest_probability = probability
+            if(highest_probability > 0):
+                alignment_r.append([best_index,target_index])
+    
+        for i in range(len(source_sentence)):
+            for j in range(len(target_sentence)):
+                if [i, j] in alignment and [i, j] in alignment_r:
+                    sys.stdout.write("%i-%i " % (i, j))
+
         sys.stdout.write("\n")
 
-
-if __name__ == "__main__":
-    o, fd, ed = parse()
+        
+        
+        
+if __name__ == "__main__": 
+    o, f, e = parse()
     loglvl = logging.DEBUG if o.debugging else logging.INFO
     logging.basicConfig(level=loglvl)
-    
-    b = []
-    for p in zip(open(fd), open(ed)):
-        temp = []
-        for s in p:
-            temp.append(s.strip().split())
-        b.append(temp)
-            
-            
-            
+    b = [[s.strip().split() for s in p] for p in zip(open(f), open(e))][:o.num_sents]
+    br = [[s.strip().split() for s in p] for p in zip(open(e), open(f))][:o.num_sents]
     if o.lower:
         b = [[[word.lower() for word in fst],[word.lower() for word in est]] for fst, est in b]
-    ft = [Input[0] for Input in b]
-    et = [Input[1] for Input in b]
+    ft = [sent[0] for sent in b]
+    et = [sent[1] for sent in b]
     f_tokenizer = Tokenizer(ft)
     e_tokenizer = Tokenizer(et)
+    
+    ftr = [sent[0] for sent in br]
+    etr = [sent[1] for sent in br]
+    f_tokenizer_r = Tokenizer(etr)
+    e_tokenizer_r = Tokenizer(ftr)
 
-    logging.info(f"Vocabulary size - foreign:{f_tokenizer.V}, english:{e_tokenizer.V}")
+  
+
+    logging.info(f"french:{f_tokenizer.V}, english:{e_tokenizer.V}")
     if o.load_path:
-        model = pk.load(open(o.load_path, "rb"))
+        ibm = pk.load(open(o.load_path, "rb"))
         if o.iter_now is not None:
-            model.train(o.iter_now)
+            ibm.train(o.iter_now)
     else:
-        model = IBMModel1(b, f_tokenizer, e_tokenizer, o.save_path, tolerance=o.eps, max_iterations=o.max_iters)
-        model.train()
-    align(model, b)
+        ibm = IBMModel1(b, f_tokenizer, e_tokenizer, o.save_path, tolerance=o.eps, max_iterations=o.max_iters)
+        ibm.train()
+        
+    if o.load_path_r:
+        ibm_r = pk.load(open(o.load_path_r, "rb"))
+        if o.iter_now is not None:
+            ibm_r.train(o.iter_now)
+    else:
+        ibm_r = IBMModel1(br, f_tokenizer_r, e_tokenizer_r, o.save_path_r, tolerance=o.eps, max_iterations=o.max_iters)
+        ibm_r.train()
+
+    align(ibm, ibm_r, b)
